@@ -1,0 +1,378 @@
+---
+title: "FInal Project Sepsis survival rates"
+author: "JN"
+date: "2026-02-19"
+output: html_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+```{r}
+install.packages(c("tidyverse", "rio", "car", "pwr", "MOTE", "Hmisc", "corrplot", "psych", "ppcor", "gh", "devtools", "remotes", "ggplot2"))    
+if (!require("pacman")) install.packages("pacman")
+pacman::p_load(tidyverse, rio, ez, MOTE, ggplot2, gridExtra)
+
+```
+```{r}
+library(tidyverse)      # ggplot2, dplyr
+library(rio)            # import() function
+library(car)            # vif(), influencePlot()
+library(corrplot)       # Visual correlation matrices
+library(psych)          # Descriptive statistics
+library(ppcor)          # spcor(), ppcor() for partial correlations
+library(knitr)          # Markdown tables
+library(kableExtra) 
+library(pwr)       # For power analysis
+library(MOTE)      # For effect size calculations
+library(Hmisc)     # For plotting error bars
+library(gridExtra)
+```
+
+```{r}
+data <- read.csv("sepsis-primary-norway.csv")
+str(data)
+summary(data)
+psych::describe(data)
+dim(data)
+korean <- read.csv("data/Sepsis-validation-Korea.csv")
+str(korean)
+summary(korean)
+psych::describe(korean)
+dim(korean)
+```
+
+```{r}
+library(ggplot2)
+p1 <- ggplot(data, aes(x = age_years)) +
+  geom_histogram(fill = "orange", color = "black", bins = 30) +
+  labs(title = "Histogram of age Norway",
+       subtitle = "All ages are within the range 0-100 ",
+       x = "age", y = "Frequency") +
+  theme_minimal()
+
+# Boxplot to see any outliers clearly
+p2 <- ggplot(korean, aes(x = age_years)) +
+  geom_histogram(fill = "orange", color = "black", bins = 30) +
+  labs(title = "Histogram of age Korean",
+       subtitle = "All ages are within the range 20-89 ",
+       x = "age", y = "Frequency") +
+  theme_minimal()
+
+grid.arrange(p1, p2, ncol = 2)
+```
+
+
+
+## Accuracy
+
+
+```{r }
+noout <- data # Create a copy to update
+
+p3 <- ggplot(noout, aes(y = age_years)) +
+  geom_boxplot(fill = "orange", alpha = 0.5) +
+  labs(title = "Boxplot of age",
+       subtitle = "The data at bottom appears to be extreme",
+       y = "age") +
+  theme_minimal()
+
+# Boxplot to see any outliers clearly
+p4 <- ggplot(korean, aes(y = age_years)) +
+  geom_boxplot(fill = "orange", alpha = 0.5) +
+  labs(title = "Boxplot of age",
+       subtitle = "The data appears to have a good spread",
+       y = "age") +
+  theme_minimal()
+
+grid.arrange(p3, p4, ncol = 2)
+```
+
+
+\
+
+
+
+#Renamed column names
+
+```{r}
+colnames(noout) <- c("age", "gender", "episodes", "survival")
+colnames(korean) <- c("age", "gender", "episodes", "observed_survival")
+
+```
+
+
+#Missing values check
+```{r}
+apply(noout, 2, function(x) {sum(is.na(x)) })
+```
+
+##Outliers and duplicate values check
+
+```{r}
+
+sum(duplicated(data))
+nrow(unique(noout))
+
+```
+
+# Descriptive statistics
+
+```{r}
+norway_summary <- noout %>%
+  group_by(gender) %>%
+  summarise(
+    mean_survival = mean(survival, na.rm = TRUE),
+    n = n()
+  )
+
+norway_summary
+ggplot(norway_summary,
+       aes(x = gender, y = mean_survival)) +
+  geom_col(fill = "steelblue", width = 0.6) +
+  geom_text(aes(label = round(mean_survival, 2)),
+            vjust = -0.5,
+            size = 5) +
+  coord_cartesian(ylim = c(0, 1)) +
+  labs(title = "Average Survival Rate by Sex – Norway Cohort",
+       x = "Sex",
+       y = "Survival Rate") +
+  theme_clean
+```
+
+```{r}
+korean_summary <- korean %>%
+  group_by(gender) %>%
+  summarise(
+    mean_survival = mean(observed_survival, na.rm = TRUE),
+    n = n()
+  )
+
+korean_summary
+ggplot(korean_summary,
+       aes(x = gender, y = mean_survival)) +
+  geom_col(fill = "steelblue", width = 0.6) +
+  geom_text(aes(label = round(mean_survival, 2)),
+            vjust = -0.5,
+            size = 5) +
+  coord_cartesian(ylim = c(0, 1)) +
+  labs(title = "Average Survival Rate by Sex – Norway Cohort",
+       x = "Sex",
+       y = "Survival Rate") +
+  theme_clean
+```
+
+#Corelation matrix 
+
+```{r}
+corr_matrix <- cor(noout[, c("survival", "age", "gender", "episodes")])
+round(corr_matrix, 2)
+corrplot(corr_matrix,
+         method = "color",
+         tl.col = "black",
+         tl.srt = 45)
+
+```
+#Logrithimic regression model fitting
+```{r}
+model_logit<- glm(survival ~ age + gender + episodes,
+                  family=binomial, data = noout)
+summary(model_logit)
+```
+#Odd's ratio and confidence interval summary
+```{r}
+# Coefficients
+model_summary <- summary(model_logit)
+coef_table <- model_summary$coefficients
+
+# Odds ratios
+OR <- exp(coef(model_logit))
+
+# 95% CI
+CI <- exp(confint(model_logit))  # profile likelihood CI
+
+# Combine into dataframe
+results_table <- data.frame(
+  Predictor = rownames(coef_table),
+  Estimate  = coef_table[,1],
+  Std_Error = coef_table[,2],
+  OR        = OR,
+  CI_Lower  = CI[,1],
+  CI_Upper  = CI[,2],
+  p_value   = coef_table[,4]
+)
+results_table <- results_table[-1, ]
+
+library(kableExtra)
+
+kable(results_table,row.names = FALSE,
+      digits = 3,
+      caption = "Logistic Regression Results: Odds Ratios and 95% CI") %>%
+  kable_styling(full_width = FALSE)
+```
+
+
+
+```{r}
+library(car)
+vif(model_logit)
+
+```
+
+```{r}
+summary(hatvalues(model_logit))
+summary(cooks.distance(model_logit))
+
+```
+```{r}
+# Get predicted probabilities
+noout$predicted_prob <- predict(model_logit, type = "response")
+head(noout)
+```
+
+```{r}
+noout$risk_group <- cut(
+  noout$predicted_prob,
+  breaks = quantile(noout$predicted_prob,
+                    probs = c(0, .33, .66, 1)),
+  include.lowest = TRUE,
+  labels = c("High Risk", "Medium Risk", "Low Risk")
+)
+
+```
+
+
+
+```{r}
+library(ggplot2)
+
+library(dplyr)
+
+noout %>%
+  group_by(risk_group) %>%
+  summarise(mean_survival = mean(survival))
+
+ 
+theme_clean <- theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    axis.title = element_text(face = "bold"),
+    panel.grid.minor = element_blank()
+  )
+
+
+ggplot(risk_summary,
+       aes(x = risk_group,
+           y = survival,
+           fill = risk_group)) +
+  geom_col() +
+  labs(title = "Observed Survival Rate by Risk groups",
+       x = "Risk Group",
+       y = "Observed Survival Probability") +
+  ylim(0, 1) +
+  theme_minimal() +
+  guides(fill = "none")+
+  theme_clean
+
+
+
+```
+
+
+
+
+
+
+```{r}
+# refit model using model_logit and estimate the predicted probability in the Korean dataset
+
+korean$predicted_prob_survival <- predict(model_logit,
+                                 newdata = korean,
+                                 type = "response")
+head(korean)
+
+```
+
+#Assign Korean patients into risk groups using the training cutoff
+
+```{r}
+train_probs <- predict(model_logit,
+                       type = "response")
+
+train_cutoffs <- quantile(train_probs,
+                          probs = c(0, .33, .66, 1))
+
+korean$risk_group <- cut(korean$predicted_prob_survival,
+                         breaks = train_cutoffs, 
+                         labels =  c("Low","Medium","High"),
+                         include.lowest = TRUE)
+
+head(korean)
+
+```
+
+```{r}
+mean(korean$predicted_prob_survival)
+mean(korean$observed_survival)
+
+```
+
+
+
+
+
+```{r}
+korean_risk_summary_predicted <- aggregate(predicted_prob_survival ~ risk_group,
+          data = korean,
+          mean)
+head(korean_risk_summary_predicted)
+
+korean_risk_summary_observed <- aggregate(observed_survival ~ risk_group,
+          data = korean,
+          mean)
+head(korean_risk_summary_observed)
+```
+
+
+
+
+```{r}
+library (ggplot2)
+p1 <- ggplot(korean_risk_summary_predicted ,
+       aes(x = risk_group,
+           y = predicted_prob_survival,
+             fill = risk_group)) +
+  geom_col() +
+  labs(title = "Predicted Survival for Validation data",
+       x = "Risk Group",
+       y = "Predicted Probability of survival") +
+  ylim(0, 1) +
+  theme_minimal() +
+  guides(fill = "none")+
+  theme_clean
+
+p2 <- ggplot(korean_risk_summary_observed ,
+       aes(x = risk_group,
+           y = observed_survival,
+             fill = risk_group)) +
+  geom_col() +
+  labs(title = "Observed Survival for Validation data",
+       x = "Risk Group",
+       y = "Observed survival") +
+  ylim(0, 1) +
+  theme_minimal() +
+  guides(fill = "none")+
+  theme_clean
+
+library(gridExtra)
+grid.arrange(p1, p2, ncol = 2)
+
+```
+
