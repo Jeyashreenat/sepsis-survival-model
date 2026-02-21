@@ -16,10 +16,6 @@ This is an R Markdown document. Markdown is a simple formatting syntax for autho
 
 When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
 ```{r}
-install.packages(c("tidyverse", "rio", "car", "pwr", "MOTE", "Hmisc", "corrplot", "psych", "ppcor", "gh", "devtools", "remotes", "ggplot2"))    
-if (!require("pacman")) install.packages("pacman")
-pacman::p_load(tidyverse, rio, ez, MOTE, ggplot2, gridExtra)
-
 ```
 ```{r}
 library(tidyverse)      # ggplot2, dplyr
@@ -34,6 +30,17 @@ library(pwr)       # For power analysis
 library(MOTE)      # For effect size calculations
 library(Hmisc)     # For plotting error bars
 library(gridExtra)
+library(ggplot2)
+```
+```{r}
+clean_theme <- function() {
+  theme_minimal(base_size = 14) +
+    theme(
+      plot.title = element_text(face = "bold", hjust = 0.5),
+      axis.title = element_text(face = "bold"),
+      panel.grid.minor = element_blank()
+    )
+}
 ```
 
 ```{r}
@@ -50,7 +57,7 @@ dim(korean)
 ```
 
 ```{r}
-library(ggplot2)
+
 p1 <- ggplot(data, aes(x = age_years)) +
   geom_histogram(fill = "orange", color = "black", bins = 30) +
   labs(title = "Histogram of age Norway",
@@ -74,7 +81,7 @@ grid.arrange(p1, p2, ncol = 2)
 ## Accuracy
 
 
-```{r }
+```{r}
 noout <- data # Create a copy to update
 
 p3 <- ggplot(noout, aes(y = age_years)) +
@@ -144,7 +151,7 @@ ggplot(norway_summary,
   labs(title = "Average Survival Rate by Sex – Norway Cohort",
        x = "Sex",
        y = "Survival Rate") +
-  theme_clean
+  clean_theme()
 ```
 
 ```{r}
@@ -166,7 +173,7 @@ ggplot(korean_summary,
   labs(title = "Average Survival Rate by Sex – Norway Cohort",
        x = "Sex",
        y = "Survival Rate") +
-  theme_clean
+  clean_theme()
 ```
 
 #Corelation matrix 
@@ -235,6 +242,7 @@ summary(cooks.distance(model_logit))
 # Get predicted probabilities
 noout$predicted_prob <- predict(model_logit, type = "response")
 head(noout)
+summary(noout)
 ```
 
 ```{r}
@@ -251,35 +259,25 @@ noout$risk_group <- cut(
 
 
 ```{r}
-library(ggplot2)
-
 library(dplyr)
-
 noout %>%
   group_by(risk_group) %>%
   summarise(mean_survival = mean(survival))
 
- 
-theme_clean <- theme_minimal(base_size = 14) +
-  theme(
-    plot.title = element_text(face = "bold", hjust = 0.5),
-    axis.title = element_text(face = "bold"),
-    panel.grid.minor = element_blank()
-  )
-
-
-ggplot(risk_summary,
+library(ggplot2)
+ggplot(noout,
        aes(x = risk_group,
-           y = survival,
+           y = predicted_prob,
            fill = risk_group)) +
   geom_col() +
-  labs(title = "Observed Survival Rate by Risk groups",
+  labs(title = "Predicted survival Rate by Risk groups",
        x = "Risk Group",
-       y = "Observed Survival Probability") +
+       y = "Predicted Survival Probability") +
   ylim(0, 1) +
   theme_minimal() +
   guides(fill = "none")+
-  theme_clean
+  clean_theme()
+
 
 
 
@@ -297,7 +295,7 @@ korean$predicted_prob_survival <- predict(model_logit,
                                  newdata = korean,
                                  type = "response")
 head(korean)
-
+summary(korean)
 ```
 
 #Assign Korean patients into risk groups using the training cutoff
@@ -311,7 +309,7 @@ train_cutoffs <- quantile(train_probs,
 
 korean$risk_group <- cut(korean$predicted_prob_survival,
                          breaks = train_cutoffs, 
-                         labels =  c("Low","Medium","High"),
+                         labels =  c("High","Medium","Low"),
                          include.lowest = TRUE)
 
 head(korean)
@@ -319,13 +317,15 @@ head(korean)
 ```
 
 ```{r}
-mean(korean$predicted_prob_survival)
-mean(korean$observed_survival)
-
+summary(korean$predicted_prob_survival)
+summary(train_probs)
 ```
 
-
-
+```{r}
+train_cutoffs
+table(korean$risk_group, useNA = "ifany")
+summary(korean$predicted_prob_survival)
+```
 
 
 ```{r}
@@ -344,7 +344,7 @@ head(korean_risk_summary_observed)
 
 
 ```{r}
-library (ggplot2)
+
 p1 <- ggplot(korean_risk_summary_predicted ,
        aes(x = risk_group,
            y = predicted_prob_survival,
@@ -354,9 +354,8 @@ p1 <- ggplot(korean_risk_summary_predicted ,
        x = "Risk Group",
        y = "Predicted Probability of survival") +
   ylim(0, 1) +
-  theme_minimal() +
   guides(fill = "none")+
-  theme_clean
+  clean_theme()
 
 p2 <- ggplot(korean_risk_summary_observed ,
        aes(x = risk_group,
@@ -367,9 +366,8 @@ p2 <- ggplot(korean_risk_summary_observed ,
        x = "Risk Group",
        y = "Observed survival") +
   ylim(0, 1) +
-  theme_minimal() +
   guides(fill = "none")+
-  theme_clean
+  clean_theme()
 
 library(gridExtra)
 grid.arrange(p1, p2, ncol = 2)
